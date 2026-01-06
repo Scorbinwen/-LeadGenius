@@ -10,6 +10,11 @@ window.addEventListener('DOMContentLoaded', () => {
     loadAnalyzedLeads();
     // Set up event delegation for lead action buttons
     setupLeadActionListeners();
+    // Also check for product description on page load (in case it wasn't loaded with leads)
+    const productDescription = sessionStorage.getItem('productDescription');
+    if (productDescription) {
+        updateCampaignInfo(productDescription);
+    }
 });
 
 // Set up event delegation for lead action buttons
@@ -39,6 +44,11 @@ function setupLeadActionListeners() {
 function loadAnalyzedLeads() {
     try {
         const storedLeads = sessionStorage.getItem('analyzedLeads');
+        const productDescription = sessionStorage.getItem('productDescription');
+        
+        // Update campaign section with product information
+        updateCampaignInfo(productDescription);
+        
         if (storedLeads) {
             const leads = JSON.parse(storedLeads);
             if (Array.isArray(leads) && leads.length > 0) {
@@ -50,8 +60,48 @@ function loadAnalyzedLeads() {
                 sessionStorage.removeItem('analyzedLeads');
             }
         }
+        
+        // Clear product description from sessionStorage after loading (optional - you might want to keep it)
+        // sessionStorage.removeItem('productDescription');
     } catch (error) {
         console.error('Error loading analyzed leads:', error);
+    }
+}
+
+// Update campaign section with product information
+function updateCampaignInfo(productDescription) {
+    const campaignNameEl = document.getElementById('campaignName');
+    const campaignDescEl = document.getElementById('campaignDesc');
+    
+    if (productDescription && productDescription.trim()) {
+        // Extract product name (first line or first 50 chars)
+        const lines = productDescription.trim().split('\n');
+        const firstLine = lines[0].trim();
+        
+        // Use first line as name, or first 50 chars if it's too long
+        const productName = firstLine.length > 50 
+            ? firstLine.substring(0, 50) + '...' 
+            : firstLine;
+        
+        // Use full description, or truncate if too long
+        const productDesc = productDescription.length > 150
+            ? productDescription.substring(0, 150) + '...'
+            : productDescription;
+        
+        if (campaignNameEl) {
+            campaignNameEl.textContent = productName;
+        }
+        if (campaignDescEl) {
+            campaignDescEl.textContent = productDesc;
+        }
+    } else {
+        // Default text if no product description
+        if (campaignNameEl) {
+            campaignNameEl.textContent = 'No product selected';
+        }
+        if (campaignDescEl) {
+            campaignDescEl.textContent = 'Enter a product description to start analyzing leads.';
+        }
     }
 }
 

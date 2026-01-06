@@ -6,6 +6,7 @@ import json
 import os
 import pandas as pd
 from datetime import datetime
+import time
 from playwright.async_api import async_playwright
 from fastmcp import FastMCP
 from dotenv import load_dotenv
@@ -350,39 +351,68 @@ async def search_notes_impl(keywords: str, limit: int = 100) -> str:
     # Build search URL and visit
     search_url = f"https://www.reddit.com/search/?q={keywords}"
     try:
-        print(f"Searching Reddit for: {keywords}")
+        search_start_time = time.time()
+        print(f"[TIMING] Starting search stage - Searching Reddit for: {keywords}")
         print(f"Search URL: {search_url}")
+        
+        # Stage 1: Navigate to search page
+        nav_start = time.time()
         await main_page.goto(search_url, timeout=60000, wait_until="networkidle")
+        nav_time = time.time() - nav_start
+        print(f"[TIMING] Navigation to search page took: {nav_time:.2f}s")
+        
         # Wait for search results to load - Reddit uses dynamic loading
-        await asyncio.sleep(3)
+        # Try to wait for at least one post element instead of fixed sleep
+        wait_start = time.time()
+        try:
+            # Wait for post elements to appear (max 5 seconds)
+            await main_page.wait_for_selector('a[href*="/r/"][href*="/comments/"], a[data-testid="post-title"]', timeout=5000)
+            wait_time = time.time() - wait_start
+            print(f"[TIMING] Waiting for search results to appear took: {wait_time:.2f}s")
+        except:
+            # Fallback: short wait if selector not found
+            await asyncio.sleep(1)
+            wait_time = time.time() - wait_start
+            print(f"[TIMING] Fallback wait took: {wait_time:.2f}s")
         
         # Check current URL to verify we're on the search page
         current_url = main_page.url
         print(f"Current page URL: {current_url}")
         
+        # Stage 2: Find post elements
+        find_start = time.time()
         # Try multiple selectors for Reddit search results
         # Reddit search results can have different structures depending on the view
         post_elements = []
         
         # Method 1: Look for post title links (most common)
         # Reddit post links contain /r/ and /comments/
+        method1_start = time.time()
         try:
             # Wait for at least one post to appear
             await main_page.wait_for_selector('a[href*="/r/"][href*="/comments/"]', timeout=10000)
             post_elements = await main_page.query_selector_all('a[href*="/r/"][href*="/comments/"]')
-        except:
-            pass
+            method1_time = time.time() - method1_start
+            print(f"[TIMING] Method 1 (post title links) took: {method1_time:.2f}s, found {len(post_elements)} elements")
+        except Exception as e:
+            method1_time = time.time() - method1_start
+            print(f"[TIMING] Method 1 failed after {method1_time:.2f}s: {e}")
         
         # Method 2: If no results, try data-testid selector (new Reddit design)
         if len(post_elements) == 0:
+            method2_start = time.time()
             try:
                 await main_page.wait_for_selector('a[data-testid="post-title"]', timeout=5000)
                 post_elements = await main_page.query_selector_all('a[data-testid="post-title"]')
-            except:
-                pass
+                method2_time = time.time() - method2_start
+                print(f"[TIMING] Method 2 (data-testid) took: {method2_time:.2f}s, found {len(post_elements)} elements")
+            except Exception as e:
+                method2_time = time.time() - method2_start
+                print(f"[TIMING] Method 2 failed after {method2_time:.2f}s: {e}")
         
         # Method 3: Try looking for any link with /r/ and /comments/ pattern
         if len(post_elements) == 0:
+            method3_start = time.time()
             try:
                 all_links = await main_page.query_selector_all('a[href*="/r/"]')
                 print(f"Found {len(all_links)} links with /r/ pattern")
@@ -390,10 +420,18 @@ async def search_notes_impl(keywords: str, limit: int = 100) -> str:
                     href = await link.get_attribute('href')
                     if href and '/comments/' in href and '/r/' in href:
                         post_elements.append(link)
+                method3_time = time.time() - method3_start
+                print(f"[TIMING] Method 3 (pattern matching) took: {method3_time:.2f}s, found {len(post_elements)} elements")
             except Exception as e:
-                print(f"Method 3 error: {e}")
+                method3_time = time.time() - method3_start
+                print(f"[TIMING] Method 3 failed after {method3_time:.2f}s: {e}")
         
+        find_time = time.time() - find_start
+        print(f"[TIMING] Total time to find post elements: {find_time:.2f}s")
         print(f"Found {len(post_elements)} post elements after all methods")
+        
+        search_total_time = time.time() - search_start_time
+        print(f"[TIMING] Total search stage time: {search_total_time:.2f}s")
         
         post_links = []
         post_titles = []
@@ -495,8 +533,12 @@ async def get_note_content_impl(url: str) -> str:
     
     try:
         # Visit post link
-        await main_page.goto(url, timeout=60000)
-        await asyncio.sleep(5)  # Wait for page to load
+        await main_page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        # Wait for post content to appear instead of fixed sleep
+        try:
+            await main_page.wait_for_selector('h1[data-testid="post-title"], h1, [data-testid="post-title"]', timeout=3000)
+        except:
+            await asyncio.sleep(1)  # Minimal fallback
         
         # Get post content
         post_content = {}
@@ -612,8 +654,12 @@ async def get_note_comments(url: str) -> str:
     
     try:
         # Visit post link
-        await main_page.goto(url, timeout=60000)
-        await asyncio.sleep(5)  # Wait for page to load
+        await main_page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        # Wait for post content to appear instead of fixed sleep
+        try:
+            await main_page.wait_for_selector('h1[data-testid="post-title"], h1, [data-testid="post-title"]', timeout=3000)
+        except:
+            await asyncio.sleep(1)  # Minimal fallback
         
         # Scroll to comment section first
         comment_section_locators = [
@@ -635,7 +681,8 @@ async def get_note_comments(url: str) -> str:
         for i in range(8):
             try:
                 await main_page.evaluate("window.scrollBy(0, 500)")
-                await asyncio.sleep(1)
+                # Reduced wait for scroll
+                await asyncio.sleep(0.3)
                 
                 # Try to click "Load more comments" button
                 more_comment_selectors = [
@@ -811,8 +858,12 @@ async def post_smart_comment(url: str, comment_type: str = "lead_gen") -> str:
     
     try:
         # Visit post link
-        await main_page.goto(url, timeout=60000)
-        await asyncio.sleep(5)  # Wait for page to load
+        await main_page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        # Wait for post content to appear instead of fixed sleep
+        try:
+            await main_page.wait_for_selector('h1[data-testid="post-title"], h1, [data-testid="post-title"]', timeout=3000)
+        except:
+            await asyncio.sleep(1)  # Minimal fallback
         
         # Get post content for analysis
         post_content = {}
@@ -955,11 +1006,16 @@ async def post_smart_comment(url: str, comment_type: str = "lead_gen") -> str:
             
             # Click comment input box
             await comment_input.click()
-            await asyncio.sleep(1)
+            # Wait for input to be focused/ready instead of fixed sleep
+            try:
+                await comment_input.wait_for(state="visible", timeout=500)
+            except:
+                await asyncio.sleep(0.2)  # Minimal wait for focus
             
             # Type comment content using keyboard
-            await main_page.keyboard.type(comment_text)
-            await asyncio.sleep(1)
+            await main_page.keyboard.type(comment_text, delay=30)  # Reduced delay
+            # Reduced wait after typing
+            await asyncio.sleep(0.3)
             
             # Try to send using Enter key
             try:
@@ -1322,33 +1378,56 @@ async def _get_note_comments_structured(url: str) -> List[Dict[str, Any]]:
         return []
     
     try:
-        print(f"Getting comments from URL: {url}")
-        # Visit post link
-        await main_page.goto(url, timeout=60000)
-        await asyncio.sleep(3)  # Wait for page to load
+        comment_start_time = time.time()
+        print(f"[TIMING] Starting comment extraction stage - Getting comments from URL: {url}")
         
+        # Stage 1: Navigate to post page
+        nav_start = time.time()
+        await main_page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        nav_time = time.time() - nav_start
+        print(f"[TIMING] Navigation to post page took: {nav_time:.2f}s")
+        
+        # Wait for page content to load - use wait_for_selector instead of fixed sleep
+        wait_start = time.time()
+        try:
+            # Wait for post title or content to appear (max 3 seconds)
+            await main_page.wait_for_selector('h1[data-testid="post-title"], h1, [data-testid="post-title"]', timeout=3000)
+            wait_time = time.time() - wait_start
+            print(f"[TIMING] Waiting for post content took: {wait_time:.2f}s")
+        except:
+            # Fallback: minimal wait
+            await asyncio.sleep(0.5)
+            wait_time = time.time() - wait_start
+            print(f"[TIMING] Fallback wait took: {wait_time:.2f}s")
+        
+        # Stage 2: Wait for comment section
+        comment_section_start = time.time()
         # Wait for comments section to load - Reddit uses shreddit-comment elements
         try:
             # Wait for comment section to appear
             await main_page.wait_for_selector('shreddit-comment', timeout=10000)
-            print("Found comment section")
+            comment_section_time = time.time() - comment_section_start
+            print(f"[TIMING] Found comment section after: {comment_section_time:.2f}s")
         except:
-            print("Warning: Comment section not found, trying alternative selectors...")
-        
-        # Scroll to load more comments
-        for i in range(8):
-            await main_page.evaluate("window.scrollBy(0, 1000)")
-            await asyncio.sleep(1.5)
-        
+            comment_section_time = time.time() - comment_section_start
+            print(f"[TIMING] Comment section not found after {comment_section_time:.2f}s, trying alternative selectors...")
+
+        # Stage 4: Extract comments
+        extract_start = time.time()
         # Get comments using Reddit's actual selectors
         comments = []
         
         # Method 1: Use Reddit's shreddit-comment elements (new Reddit design)
+        method1_start = time.time()
         try:
             # Reddit uses <shreddit-comment> custom elements
             comment_elements = await main_page.query_selector_all('shreddit-comment')
+            method1_query_time = time.time() - method1_start
+            print(f"[TIMING] Querying shreddit-comment elements took: {method1_query_time:.2f}s")
             print(f"Found {len(comment_elements)} shreddit-comment elements")
             
+            # Process each comment element
+            process_start = time.time()
             for element in comment_elements:
                 try:
                     # Get username - Reddit stores it in the 'author' attribute of shreddit-comment
@@ -1500,16 +1579,27 @@ async def _get_note_comments_structured(url: str) -> List[Dict[str, Any]]:
                 except Exception as e:
                     print(f"Error processing comment element: {e}")
                     continue
+            
+            if process_start:
+                process_time = time.time() - process_start
+                print(f"[TIMING] Processing {len(comment_elements)} comment elements took: {process_time:.2f}s")
         except Exception as e:
-            print(f"Error with data-testid method: {e}")
+            method1_time = time.time() - method1_start
+            print(f"[TIMING] Method 1 failed after {method1_time:.2f}s: {e}")
         
         # Method 2: Fallback to class-based selectors (old Reddit or alternative structure)
         if len(comments) == 0:
+            method2_start = time.time()
             print("Trying fallback selectors...")
             try:
                 # Try old Reddit selectors
                 comment_elements = await main_page.query_selector_all('.comment, .Comment, [class*="comment"]')
+                method2_query_time = time.time() - method2_start
+                print(f"[TIMING] Querying fallback selectors took: {method2_query_time:.2f}s")
                 print(f"Found {len(comment_elements)} comments using class-based selectors")
+                
+                # Process fallback comments
+                fallback_process_start = time.time()
                 
                 for element in comment_elements:
                     try:
@@ -1561,10 +1651,19 @@ async def _get_note_comments_structured(url: str) -> List[Dict[str, Any]]:
                     except Exception as e:
                         print(f"Error processing fallback comment: {e}")
                         continue
+                
+                fallback_process_time = time.time() - fallback_process_start
+                print(f"[TIMING] Processing {len(comment_elements)} fallback comments took: {fallback_process_time:.2f}s")
             except Exception as e:
-                print(f"Error with fallback method: {e}")
+                method2_time = time.time() - method2_start
+                print(f"[TIMING] Fallback method failed after {method2_time:.2f}s: {e}")
         
+        extract_time = time.time() - extract_start
+        print(f"[TIMING] Total comment extraction time: {extract_time:.2f}s")
         print(f"Total comments extracted: {len(comments)}")
+        
+        comment_total_time = time.time() - comment_start_time
+        print(f"[TIMING] Total comment stage time: {comment_total_time:.2f}s")
         return comments
     
     except Exception as e:
@@ -1702,8 +1801,12 @@ async def reply_to_comment(url: str, comment_content: str, reply_text: str) -> s
     
     try:
         # Visit post link
-        await main_page.goto(url, timeout=60000)
-        await asyncio.sleep(5)  # Wait for page to load
+        await main_page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        # Wait for post content to appear instead of fixed sleep
+        try:
+            await main_page.wait_for_selector('h1[data-testid="post-title"], h1, [data-testid="post-title"]', timeout=3000)
+        except:
+            await asyncio.sleep(1)  # Minimal fallback
         
         # Scroll to comment section
         comment_section_locators = [
@@ -1725,7 +1828,8 @@ async def reply_to_comment(url: str, comment_content: str, reply_text: str) -> s
         for i in range(5):
             try:
                 await main_page.evaluate("window.scrollBy(0, 500)")
-                await asyncio.sleep(1)
+                # Reduced wait for scroll
+                await asyncio.sleep(0.3)
             except Exception:
                 pass
         
@@ -1792,11 +1896,19 @@ async def reply_to_comment(url: str, comment_content: str, reply_text: str) -> s
                             if reply_button:
                                 # Scroll to reply button
                                 await reply_button.scroll_into_view_if_needed()
-                                await asyncio.sleep(1)
+                                # Wait for button to be ready
+                                try:
+                                    await reply_button.wait_for(state="visible", timeout=500)
+                                except:
+                                    await asyncio.sleep(0.2)
                                 
                                 # Click reply button
                                 await reply_button.click()
-                                await asyncio.sleep(2)
+                                # Wait for reply input to appear instead of fixed sleep
+                                try:
+                                    await main_page.wait_for_selector('textarea, div[contenteditable="true"]', timeout=1500)
+                                except:
+                                    await asyncio.sleep(0.5)  # Reduced fallback
                                 
                                 # Find reply input box
                                 reply_input = None
@@ -1819,11 +1931,15 @@ async def reply_to_comment(url: str, comment_content: str, reply_text: str) -> s
                                 if reply_input:
                                     # Click input box
                                     await reply_input.click()
-                                    await asyncio.sleep(1)
+                                    # Wait for input to be focused
+                                    try:
+                                        await reply_input.wait_for(state="visible", timeout=300)
+                                    except:
+                                        await asyncio.sleep(0.1)
                                     
                                     # Type reply content
-                                    await main_page.keyboard.type(reply_text)
-                                    await asyncio.sleep(1)
+                                    await main_page.keyboard.type(reply_text, delay=30)  # Reduced delay
+                                    await asyncio.sleep(0.3)  # Reduced wait
                                     
                                     # Send reply
                                     send_button = None
@@ -1848,7 +1964,11 @@ async def reply_to_comment(url: str, comment_content: str, reply_text: str) -> s
                                         # Try using Enter key to send
                                         await main_page.keyboard.press('Enter')
                                     
-                                    await asyncio.sleep(3)
+                                    # Wait for reply to be posted - check for success instead of fixed sleep
+                                    try:
+                                        await main_page.wait_for_selector('button:has-text("Reply"), button[aria-label*="reply"]', timeout=2000, state="hidden")
+                                    except:
+                                        await asyncio.sleep(1)  # Reduced fallback
                                     comment_found = True
                                     return f"Successfully replied to comment: {reply_text}"
                                 
@@ -1987,11 +2107,11 @@ async def auto_promote_product(product_description: str, search_keywords: str = 
                                 "Reason": f"Error replying: {str(e)}"
                             })
                         
-                        # Avoid replying too fast, add delay
-                        await asyncio.sleep(5)
+                        # Avoid replying too fast, add minimal delay (reduced from 5s)
+                        await asyncio.sleep(2)
                 
-                # Add delay after processing each post
-                await asyncio.sleep(3)
+                # Add minimal delay after processing each post (reduced from 3s)
+                await asyncio.sleep(1)
             
             except Exception as e:
                 continue
@@ -2094,7 +2214,8 @@ async def reply_to_comment_impl(url: str, comment_content: str, reply_text: str)
         for i in range(5):
             try:
                 await main_page.evaluate("window.scrollBy(0, 500)")
-                await asyncio.sleep(1)
+                # Reduced wait for scroll
+                await asyncio.sleep(0.3)
             except Exception:
                 pass
         
@@ -2142,11 +2263,19 @@ async def reply_to_comment_impl(url: str, comment_content: str, reply_text: str)
                             if reply_button:
                                 # Scroll to reply button
                                 await reply_button.scroll_into_view_if_needed()
-                                await asyncio.sleep(1)
+                                # Wait for button to be ready
+                                try:
+                                    await reply_button.wait_for(state="visible", timeout=500)
+                                except:
+                                    await asyncio.sleep(0.2)
                                 
                                 # Click reply button
                                 await reply_button.click()
-                                await asyncio.sleep(2)
+                                # Wait for reply input to appear instead of fixed sleep
+                                try:
+                                    await main_page.wait_for_selector('textarea, div[contenteditable="true"]', timeout=1500)
+                                except:
+                                    await asyncio.sleep(0.5)  # Reduced fallback
                                 
                                 # Find reply input box
                                 reply_input = None
@@ -2169,11 +2298,15 @@ async def reply_to_comment_impl(url: str, comment_content: str, reply_text: str)
                                 if reply_input:
                                     # Click input box
                                     await reply_input.click()
-                                    await asyncio.sleep(1)
+                                    # Wait for input to be focused
+                                    try:
+                                        await reply_input.wait_for(state="visible", timeout=300)
+                                    except:
+                                        await asyncio.sleep(0.1)
                                     
                                     # Type reply content
-                                    await main_page.keyboard.type(reply_text)
-                                    await asyncio.sleep(1)
+                                    await main_page.keyboard.type(reply_text, delay=30)  # Reduced delay
+                                    await asyncio.sleep(0.3)  # Reduced wait
                                     
                                     # Send reply
                                     send_button = None
@@ -2198,7 +2331,11 @@ async def reply_to_comment_impl(url: str, comment_content: str, reply_text: str)
                                         # Try using Enter key to send
                                         await main_page.keyboard.press('Enter')
                                     
-                                    await asyncio.sleep(3)
+                                    # Wait for reply to be posted - check for success instead of fixed sleep
+                                    try:
+                                        await main_page.wait_for_selector('button:has-text("Reply"), button[aria-label*="reply"]', timeout=2000, state="hidden")
+                                    except:
+                                        await asyncio.sleep(1)  # Reduced fallback
                                     comment_found = True
                                     return f"Successfully replied to comment: {reply_text}"
                                 
@@ -2237,8 +2374,12 @@ async def post_smart_comment_impl(url: str, comment_type: str = "lead_gen", comm
     
     try:
         # Visit post link
-        await main_page.goto(url, timeout=60000)
-        await asyncio.sleep(5)  # Wait for page to load
+        await main_page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        # Wait for post content to appear instead of fixed sleep
+        try:
+            await main_page.wait_for_selector('h1[data-testid="post-title"], h1, [data-testid="post-title"]', timeout=3000)
+        except:
+            await asyncio.sleep(1)  # Minimal fallback
         
         # If comment_text is provided, skip content fetching and generation
         if comment_text and comment_text.strip():
@@ -2412,11 +2553,16 @@ async def post_smart_comment_impl(url: str, comment_type: str = "lead_gen", comm
             
             # Click comment input box
             await comment_input.click()
-            await asyncio.sleep(1)
+            # Wait for input to be focused/ready instead of fixed sleep
+            try:
+                await comment_input.wait_for(state="visible", timeout=500)
+            except:
+                await asyncio.sleep(0.2)  # Minimal wait for focus
             
             # Type comment content using keyboard
-            await main_page.keyboard.type(final_comment_text)
-            await asyncio.sleep(1)
+            await main_page.keyboard.type(final_comment_text, delay=30)  # Reduced delay
+            # Reduced wait after typing
+            await asyncio.sleep(0.3)
             
             # Try to send using Enter key
             try:
@@ -2668,9 +2814,11 @@ async def step_by_step_promote_impl(
                                 "reason": f"Error replying: {str(e)}"
                             })
                         
-                        await asyncio.sleep(5)
+                        # Reduced delay to avoid rate limiting (from 5s to 2s)
+                        await asyncio.sleep(2)
                     
-                    await asyncio.sleep(3)
+                    # Reduced delay after processing (from 3s to 1s)
+                    await asyncio.sleep(1)
                 except Exception as e:
                     continue
             
