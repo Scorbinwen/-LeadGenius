@@ -8,3 +8,4 @@ pandas
 openai
 anthropic
 praw
+google-genai

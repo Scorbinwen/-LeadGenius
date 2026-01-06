@@ -43,8 +43,9 @@ playwright_instance = None
 current_loop_id = None  # Store event loop ID
 
 # LLM Configuration
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # "openai", "anthropic" or "ollama"
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # "openai", "gemini", "anthropic" or "ollama"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://10.10.10.217:11434/v1")  # Ollama server address (needs /v1 path)
 LLM_MODEL = os.getenv("LLM_MODEL", "Qwen2")  # Default to gpt-4o-mini, more economical
@@ -61,7 +62,43 @@ async def _call_llm(prompt: str, system_prompt: str = "", max_tokens: int = 500)
         Text returned by LLM
     """
     try:
-        if LLM_PROVIDER == "anthropic":
+        if LLM_PROVIDER == "gemini":
+            # Import google genai (install with: pip install google-genai)
+            try:
+                from google import genai
+            except ImportError:
+                raise ImportError("google-genai package not installed. Install with: pip install google-genai")
+            
+            if not GEMINI_API_KEY:
+                raise ValueError("GEMINI_API_KEY environment variable not set")
+            
+            # Set GEMINI_API_KEY in environment if not already set
+            if not os.getenv("GEMINI_API_KEY"):
+                os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
+            
+            # The client gets the API key from the environment variable `GEMINI_API_KEY`
+            client = genai.Client()
+            
+            # Set model name (default to gemini-2.5-flash if not specified)
+            # Common models: gemini-2.5-flash, gemini-1.5-pro, gemini-1.5-flash
+            model_name = LLM_MODEL if LLM_MODEL and "gemini" in LLM_MODEL.lower() else "gemini-2.5-flash"
+            
+            # Combine system prompt and user prompt
+            # Gemini doesn't have a separate system parameter, so we combine them
+            if system_prompt:
+                full_prompt = f"{system_prompt}\n\n{prompt}"
+            else:
+                full_prompt = prompt
+            
+            # Generate content
+            # Note: Gemini API is synchronous, so we run it in executor to make it async-compatible
+            response = client.models.generate_content(
+                model=model_name, contents=full_prompt
+            )
+            
+            return response.text
+        
+        elif LLM_PROVIDER == "anthropic":
             from anthropic import AsyncAnthropic
             
             if not ANTHROPIC_API_KEY:
