@@ -2186,6 +2186,245 @@ async def generate_search_keywords_impl(product_description: str) -> str:
     keywords = await _generate_search_keywords(product_description)
     return f"Search keywords generated from product description: {keywords}"
 
+async def post_smart_comment_impl(url: str, comment_type: str = "lead_gen", comment_text: Optional[str] = None) -> str:
+    """Post smart comment based on post content (original implementation, unwrapped from @mcp.tool())
+    
+    Args:
+        url: Post URL
+        comment_type: Comment type (lead_gen, like, consult, professional)
+        comment_text: Optional pre-generated comment text. If provided, skips content fetching and comment generation.
+    """
+    login_status = await ensure_browser()
+    if not login_status:
+        return "Please login to Reddit account first to post comments"
+    
+    try:
+        # Visit post link
+        await main_page.goto(url, timeout=60000)
+        await asyncio.sleep(5)  # Wait for page to load
+        
+        # If comment_text is provided, skip content fetching and generation
+        if comment_text and comment_text.strip():
+            # Use the provided comment text directly
+            final_comment_text = comment_text.strip()
+        else:
+            # Get post content for analysis
+            post_content = {}
+            
+            # Get post title
+            try:
+                title_selectors = [
+                    'h1[data-testid="post-title"]',
+                    'h1',
+                    '[data-testid="post-title"]',
+                    'a[data-testid="post-title"]'
+                ]
+                for selector in title_selectors:
+                    try:
+                        title_element = await main_page.query_selector(selector)
+                        if title_element:
+                            title = await title_element.text_content()
+                            if title and title.strip():
+                                post_content["Title"] = title.strip()
+                                break
+                    except:
+                        continue
+                if "Title" not in post_content:
+                    post_content["Title"] = "Unknown title"
+            except Exception:
+                post_content["Title"] = "Unknown title"
+            
+            # Get author
+            try:
+                author_selectors = [
+                    'a[data-testid="post_author_link"]',
+                    'a[href*="/user/"]',
+                    'a[href*="/u/"]'
+                ]
+                for selector in author_selectors:
+                    try:
+                        author_element = await main_page.query_selector(selector)
+                        if author_element:
+                            author = await author_element.text_content()
+                            if author and author.strip():
+                                post_content["Author"] = author.strip()
+                                break
+                    except:
+                        continue
+                if "Author" not in post_content:
+                    post_content["Author"] = "Unknown author"
+            except Exception:
+                post_content["Author"] = "Unknown author"
+            
+            # Get post body content
+            try:
+                content_selectors = [
+                    'div[data-testid="post-content"]',
+                    'div.md',
+                    'article',
+                    'div[data-testid="comment"]'
+                ]
+                
+                post_content["Content"] = "Failed to get content"
+                for selector in content_selectors:
+                    try:
+                        content_element = await main_page.query_selector(selector)
+                        if content_element:
+                            content_text = await content_element.text_content()
+                            if content_text and len(content_text.strip()) > 10:
+                                post_content["Content"] = content_text.strip()
+                                break
+                    except:
+                        continue
+                
+                # Use JavaScript to extract main text content
+                if post_content["Content"] == "Failed to get content":
+                    content_text = await main_page.evaluate('''
+                        () => {
+                            const contentElements = Array.from(document.querySelectorAll('div, p, article'))
+                                .filter(el => {
+                                    const text = el.textContent.trim();
+                                    return text.length > 50 && text.length < 5000 &&
+                                        el.querySelectorAll('a, button').length < 5 &&
+                                        el.children.length < 10;
+                                })
+                                .sort((a, b) => b.textContent.length - a.textContent.length);
+                            
+                            if (contentElements.length > 0) {
+                                return contentElements[0].textContent.trim();
+                            }
+                            
+                            return null;
+                        }
+                    ''')
+                    
+                    if content_text:
+                        post_content["Content"] = content_text
+            except Exception:
+                post_content["Content"] = "Failed to get content"
+            
+            # Generate smart comment based on post content and comment type
+            final_comment_text = await _generate_smart_comment(post_content, comment_type)
+        
+        # Locate comment input box based on page snapshot
+        # Locate comment area first
+        try:
+            # Try to find comment count area first, it usually contains "comments" text
+            comment_count_selectors = [
+                'text="comments"',
+                'text="comment"',
+                'text=/\\d+ comments/',
+            ]
+            
+            for selector in comment_count_selectors:
+                try:
+                    comment_count_element = await main_page.query_selector(selector)
+                    if comment_count_element:
+                        await comment_count_element.scroll_into_view_if_needed()
+                        await asyncio.sleep(2)
+                        break
+                except Exception:
+                    continue
+                
+            # Locate comment input box
+            input_box_selectors = [
+                'paragraph:has-text("Add a comment...")',
+                'text="Add a comment..."',
+                'text="What are your thoughts?"',
+                'div[contenteditable="true"]',
+                'textarea[placeholder*="comment"]'
+            ]
+            
+            comment_input = None
+            for selector in input_box_selectors:
+                try:
+                    input_element = await main_page.query_selector(selector)
+                    if input_element and await input_element.is_visible():
+                        await input_element.scroll_into_view_if_needed()
+                        await asyncio.sleep(1)
+                        comment_input = input_element
+                        break
+                except Exception:
+                    continue
+                    
+            # If all above methods failed, try using JavaScript to find
+            if not comment_input:
+                comment_input = await main_page.evaluate('''
+                    () => {
+                        // Find elements containing "Add a comment" or similar
+                        const elements = Array.from(document.querySelectorAll('*'))
+                            .filter(el => el.textContent && (
+                                el.textContent.includes('Add a comment') ||
+                                el.textContent.includes('What are your thoughts')
+                            ));
+                        if (elements.length > 0) return elements[0];
+                        
+                        // Find editable div elements
+                        const editableDivs = Array.from(document.querySelectorAll('div[contenteditable="true"]'));
+                        if (editableDivs.length > 0) return editableDivs[0];
+                        
+                        return null;
+                    }
+                ''')
+                
+                if comment_input:
+                    comment_input = await main_page.query_selector_all('*')[-1]  # Use last element as placeholder
+            
+            if not comment_input:
+                return "Unable to find comment input box, cannot post comment"
+            
+            # Click comment input box
+            await comment_input.click()
+            await asyncio.sleep(1)
+            
+            # Type comment content using keyboard
+            await main_page.keyboard.type(final_comment_text)
+            await asyncio.sleep(1)
+            
+            # Try to send using Enter key
+            try:
+                # Look for send button
+                send_button_selectors = [
+                    'button:has-text("Comment")',
+                    'button:has-text("Post")',
+                    'button[type="submit"]'
+                ]
+                
+                send_button = None
+                for selector in send_button_selectors:
+                    elements = await main_page.query_selector_all(selector)
+                    for element in elements:
+                        text_content = await element.text_content()
+                        if text_content and ('Comment' in text_content or 'Post' in text_content):
+                            send_button = element
+                            break
+                    if send_button:
+                        break
+                
+                if send_button:
+                    await send_button.click()
+                else:
+                    # If send button not found, use Enter key
+                    await main_page.keyboard.press('Enter')
+                
+                await asyncio.sleep(3)  # Wait for comment to be sent
+                
+                return f"Successfully posted comment: {final_comment_text}"
+            except Exception as e:
+                # If clicking send button failed, try sending via Enter key
+                try:
+                    await main_page.keyboard.press('Enter')
+                    await asyncio.sleep(3)
+                    return f"Comment sent via Enter key: {final_comment_text}"
+                except Exception as press_error:
+                    return f"Error trying to send comment: {str(e)}, Enter key also failed: {str(press_error)}"
+                
+        except Exception as e:
+            return f"Error operating comment section: {str(e)}"
+    
+    except Exception as e:
+        return f"Error posting comment: {str(e)}"
+
 async def _get_or_generate_keywords(product_description: str, search_keywords: str) -> str:
     """Get or generate search keywords (helper function)"""
     if not search_keywords or search_keywords.strip() == "":

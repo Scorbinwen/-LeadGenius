@@ -45,6 +45,7 @@ try:
     reply_to_comment = getattr(service_mcp, 'reply_to_comment', None)
     # Use _impl version to avoid FunctionTool wrapper from @mcp.tool() decorator
     generate_search_keywords_impl = getattr(service_mcp, 'generate_search_keywords_impl', None)
+    post_smart_comment_impl = getattr(service_mcp, 'post_smart_comment_impl', None)
     auto_promote_product = getattr(service_mcp, 'auto_promote_product', None)
     ensure_browser = getattr(service_mcp, 'ensure_browser', None)
     
@@ -145,6 +146,7 @@ class GetCommentsResponse(BaseModel):
 class PostCommentRequest(BaseModel):
     url: str = Field(..., description="Note URL")
     comment_type: str = Field("lead_gen", description="Comment type: lead_gen, like, consult, professional")
+    comment_text: Optional[str] = Field(None, description="Optional: Pre-generated comment text to post directly without regenerating")
 
 class PostCommentResponse(BaseModel):
     success: bool
@@ -213,6 +215,15 @@ async def dashboard():
         return FileResponse(dashboard_path)
     else:
         raise HTTPException(status_code=404, detail="Dashboard page not found")
+
+@app.get("/smart-comment.html")
+async def smart_comment_page():
+    """Serve the smart comment page"""
+    smart_comment_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "smart-comment.html")
+    if os.path.exists(smart_comment_path):
+        return FileResponse(smart_comment_path)
+    else:
+        raise HTTPException(status_code=404, detail="Smart comment page not found")
 
 # Serve static files (CSS, JS) - must be after API routes
 @app.get("/styles.css")
@@ -480,18 +491,145 @@ async def get_note_comments_endpoint(request: GetCommentsRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get comments: {str(e)}")
 
+@app.post("/api/generate-comment", response_model=PostCommentResponse)
+async def generate_comment(request: PostCommentRequest):
+    """Generate a smart comment preview without posting"""
+    try:
+        # Import the internal function to generate comment without posting
+        _generate_smart_comment = getattr(service_mcp, '_generate_smart_comment', None)
+        get_note_content_impl = getattr(service_mcp, 'get_note_content_impl', None)
+        
+        if not _generate_smart_comment or not callable(_generate_smart_comment):
+            raise HTTPException(status_code=500, detail="_generate_smart_comment not found")
+        
+        if not get_note_content_impl:
+            raise HTTPException(status_code=500, detail="get_note_content_impl not found")
+        
+        # Get post content - we need structured data (Title, Content, Author)
+        # The post_smart_comment function gets this data, so we'll replicate that logic
+        # For now, we'll use get_note_content_impl and parse it, or visit the page directly
+        # Actually, let's just visit the page and extract the data like post_smart_comment does
+        from service_mcp import ensure_browser, main_page
+        
+        login_status = await ensure_browser()
+        if not login_status:
+            raise HTTPException(status_code=400, detail="Please login to Reddit first")
+        
+        # Visit post link to get structured content
+        await main_page.goto(request.url, timeout=60000)
+        await asyncio.sleep(3)
+        
+        # Extract post content similar to post_smart_comment
+        post_content = {
+            "Title": "",
+            "Content": "",
+            "Author": ""
+        }
+        
+        # Get post title
+        try:
+            title_selectors = [
+                'h1[data-testid="post-title"]',
+                'h1',
+                '[data-testid="post-title"]',
+                'a[data-testid="post-title"]'
+            ]
+            for selector in title_selectors:
+                try:
+                    title_element = await main_page.query_selector(selector)
+                    if title_element:
+                        title = await title_element.text_content()
+                        if title and title.strip():
+                            post_content["Title"] = title.strip()
+                            break
+                except:
+                    continue
+        except:
+            pass
+        
+        # Get author
+        try:
+            author_selectors = [
+                'a[data-testid="post_author_link"]',
+                'a[href*="/user/"]',
+                'a[href*="/u/"]'
+            ]
+            for selector in author_selectors:
+                try:
+                    author_element = await main_page.query_selector(selector)
+                    if author_element:
+                        author = await author_element.text_content()
+                        if author and author.strip():
+                            post_content["Author"] = author.strip()
+                            break
+                except:
+                    continue
+        except:
+            pass
+        
+        # Get post body content
+        try:
+            content_selectors = [
+                'div[data-testid="post-content"]',
+                'div[data-testid="post-content"] p',
+                'article p',
+                'div.usertext-body'
+            ]
+            for selector in content_selectors:
+                try:
+                    content_elements = await main_page.query_selector_all(selector)
+                    if content_elements:
+                        content_parts = []
+                        for el in content_elements[:5]:  # Limit to first 5 paragraphs
+                            text = await el.text_content()
+                            if text and text.strip():
+                                content_parts.append(text.strip())
+                        if content_parts:
+                            post_content["Content"] = " ".join(content_parts)
+                            break
+                except:
+                    continue
+        except:
+            pass
+        
+        # If no content found, use title as content
+        if not post_content["Content"]:
+            post_content["Content"] = post_content["Title"] or "Post content"
+        
+        # Generate comment text
+        comment_text = await _generate_smart_comment(post_content, request.comment_type)
+        
+        return {
+            "success": True,
+            "message": comment_text,
+            "comment": comment_text
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        raise HTTPException(status_code=500, detail=f"Failed to generate comment: {str(e)}\n{traceback.format_exc()}")
+
 @app.post("/api/post-comment", response_model=PostCommentResponse)
 async def post_comment(request: PostCommentRequest):
     """Post a smart comment on a Reddit post"""
     try:
-        result = await post_smart_comment(request.url, request.comment_type)
-        success = "success" in result.lower()
+        # Use _impl version to avoid FunctionTool wrapper from @mcp.tool() decorator
+        if post_smart_comment_impl is None:
+            raise HTTPException(status_code=500, detail="post_smart_comment_impl not found")
+        
+        # Pass comment_text if provided to avoid regenerating it
+        result = await post_smart_comment_impl(request.url, request.comment_type, request.comment_text)
+        success = "success" in result.lower() or "posted" in result.lower() or "commented" in result.lower()
         return {
             "success": success,
             "message": result
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to post comment: {str(e)}")
+        import traceback
+        raise HTTPException(status_code=500, detail=f"Failed to post comment: {str(e)}\n{traceback.format_exc()}")
 
 @app.post("/api/reply-comment", response_model=ReplyCommentResponse)
 async def reply_comment(request: ReplyCommentRequest):
@@ -569,7 +707,7 @@ async def analyze_product(request: AnalyzeProductRequest):
         if search_notes_impl is None:
             raise HTTPException(status_code=500, detail="search_notes_impl not found")
         
-        search_result = await search_notes_impl(keywords, limit=10)
+        search_result = await search_notes_impl(keywords, limit=1)
         if not search_result or not isinstance(search_result, str) or "No posts found" in search_result:
             return {
                 "success": True,

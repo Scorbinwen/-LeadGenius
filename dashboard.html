@@ -100,6 +100,8 @@
         .nav-menu {
             flex: 1;
             padding: 1rem 0;
+            display: flex;
+            flex-direction: column;
         }
         
         .nav-item {
@@ -113,6 +115,7 @@
             font-size: 0.9375rem;
             transition: all 0.2s;
             cursor: pointer;
+            width: 100%;
         }
         
         .nav-item:hover {
@@ -536,6 +539,8 @@
             color: #6b7280;
             font-size: 0.875rem;
             line-height: 1.6;
+            margin-top: 0.75rem;
+            white-space: pre-wrap;
         }
         
         .lead-footer {
@@ -543,7 +548,55 @@
             align-items: center;
             justify-content: space-between;
             padding-top: 1rem;
+            margin-top: 1rem;
             border-top: 1px solid #f3f4f6;
+        }
+        
+        .lead-actions {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+        }
+        
+        .lead-action-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.625rem 1rem;
+            border-radius: 0.5rem;
+            border: none;
+            font-weight: 600;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .lead-action-btn.primary {
+            background: #2563eb;
+            color: white;
+        }
+        
+        .lead-action-btn.primary:hover {
+            background: #1d4ed8;
+        }
+        
+        .lead-action-btn.secondary {
+            background: #f3f4f6;
+            color: #111827;
+        }
+        
+        .lead-action-btn.secondary:hover {
+            background: #e5e7eb;
+        }
+        
+        .lead-action-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .lead-action-icon {
+            width: 16px;
+            height: 16px;
         }
         
         .lead-url {
@@ -815,6 +868,249 @@
                 grid-template-columns: repeat(2, 1fr);
             }
         }
+        
+        /* Smart Comment Modal Styles */
+        .smart-comment-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        
+        .smart-comment-modal-content {
+            background: white;
+            border-radius: 1rem;
+            width: 100%;
+            max-width: 800px;
+            max-height: 90vh;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .smart-comment-modal-header {
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .smart-comment-header-left {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .smart-comment-header-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 1.125rem;
+        }
+        
+        .smart-comment-header-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #111827;
+        }
+        
+        .smart-comment-header-subtitle {
+            font-size: 0.75rem;
+            color: #6b7280;
+            font-weight: 500;
+            margin-top: 0.25rem;
+        }
+        
+        .smart-comment-close-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.5rem;
+            transition: background 0.2s;
+        }
+        
+        .smart-comment-close-btn:hover {
+            background: #f3f4f6;
+        }
+        
+        .smart-comment-modal-body {
+            padding: 2rem;
+            overflow-y: auto;
+            flex: 1;
+        }
+        
+        .smart-comment-context-section,
+        .smart-comment-draft-section {
+            margin-bottom: 2rem;
+        }
+        
+        .smart-comment-section-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .smart-comment-platform-tag {
+            background: #dc2626;
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.625rem;
+            font-weight: 700;
+        }
+        
+        .smart-comment-context-content {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+        }
+        
+        .smart-comment-context-title {
+            font-size: 1.125rem;
+            font-weight: 700;
+            color: #111827;
+            margin-bottom: 1rem;
+        }
+        
+        .smart-comment-context-quote {
+            font-size: 0.9375rem;
+            color: #4b5563;
+            line-height: 1.7;
+            font-style: italic;
+        }
+        
+        .smart-comment-draft-box {
+            border: 2px dashed #3b82f6;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            min-height: 150px;
+            background: #f9fafb;
+            position: relative;
+        }
+        
+        .smart-comment-analyzing-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            min-height: 150px;
+        }
+        
+        .smart-comment-analyzing-icon {
+            width: 48px;
+            height: 48px;
+            border: 3px solid #e5e7eb;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .smart-comment-analyzing-text {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #6b7280;
+        }
+        
+        .smart-comment-draft-content {
+            display: none;
+        }
+        
+        .smart-comment-draft-box.has-content .smart-comment-draft-content {
+            display: block;
+        }
+        
+        .smart-comment-draft-box.has-content .smart-comment-analyzing-state {
+            display: none;
+        }
+        
+        .smart-comment-draft-text {
+            color: #111827;
+            font-size: 0.9375rem;
+            line-height: 1.7;
+            white-space: pre-wrap;
+        }
+        
+        .smart-comment-modal-footer {
+            padding: 1.5rem 2rem;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+        
+        .smart-comment-footer-btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            border: none;
+            font-weight: 600;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .smart-comment-footer-btn.secondary {
+            background: #f3f4f6;
+            color: #111827;
+        }
+        
+        .smart-comment-footer-btn.secondary:hover {
+            background: #e5e7eb;
+        }
+        
+        .smart-comment-footer-btn.primary {
+            background: #2563eb;
+            color: white;
+        }
+        
+        .smart-comment-footer-btn.primary:hover {
+            background: #1d4ed8;
+        }
+        
+        .smart-comment-footer-btn.primary:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        
+        .smart-comment-btn-icon {
+            width: 16px;
+            height: 16px;
+        }
     </style>
 </head>
 <body>
@@ -1042,6 +1338,73 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Smart Comment Modal -->
+    <div class="smart-comment-modal-overlay" id="smartCommentModal" style="display: none;">
+        <div class="smart-comment-modal-content">
+            <div class="smart-comment-modal-header">
+                <div class="smart-comment-header-left">
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <div class="smart-comment-header-icon">AI</div>
+                        <div>
+                            <div class="smart-comment-header-title">AI Growth Assistant</div>
+                            <div class="smart-comment-header-subtitle" id="smartCommentStatusText">SYNTHESIZING PLATFORM-AWARE RESPONSE</div>
+                        </div>
+                    </div>
+                </div>
+                <button class="smart-comment-close-btn" onclick="closeSmartCommentModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="smart-comment-modal-body">
+                <div class="smart-comment-context-section">
+                    <div class="smart-comment-section-label">
+                        <span class="smart-comment-platform-tag" id="smartCommentPlatformTag">REDDIT</span>
+                        ORIGINAL CONTEXT
+                    </div>
+                    <div class="smart-comment-context-content">
+                        <div class="smart-comment-context-title" id="smartCommentContextTitle"></div>
+                        <div class="smart-comment-context-quote" id="smartCommentContextQuote"></div>
+                    </div>
+                </div>
+                
+                <div class="smart-comment-draft-section">
+                    <div class="smart-comment-section-label">
+                        SMART COMMENT DRAFT
+                    </div>
+                    <div class="smart-comment-draft-box" id="smartCommentDraftBox">
+                        <div class="smart-comment-analyzing-state">
+                            <div class="smart-comment-analyzing-icon"></div>
+                            <div class="smart-comment-analyzing-text">ANALYZING FORUM ETIQUETTE...</div>
+                        </div>
+                        <div class="smart-comment-draft-content">
+                            <div class="smart-comment-draft-text" id="smartCommentDraftText"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="smart-comment-modal-footer">
+                <button class="smart-comment-footer-btn secondary" onclick="regenerateSmartComment()">
+                    <svg class="smart-comment-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"></path>
+                    </svg>
+                    REGENERATE
+                </button>
+                <button class="smart-comment-footer-btn primary" id="smartCommentSendBtn" onclick="sendSmartComment()" disabled>
+                    <svg class="smart-comment-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                    Send to Reddit
+                </button>
             </div>
         </div>
     </div>

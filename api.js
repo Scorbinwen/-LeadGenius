@@ -63,12 +63,24 @@ const API = {
         return await apiCall('/note-comments', 'POST', { url });
     },
 
-    // Post smart comment
-    async postComment(url, commentType = 'lead_gen') {
-        return await apiCall('/post-comment', 'POST', {
+    // Generate smart comment (preview only)
+    async generateComment(url, commentType = 'lead_gen') {
+        return await apiCall('/generate-comment', 'POST', {
             url,
             comment_type: commentType
         });
+    },
+
+    // Post smart comment
+    async postComment(url, commentType = 'lead_gen', commentText = null) {
+        const payload = {
+            url,
+            comment_type: commentType
+        };
+        if (commentText) {
+            payload.comment_text = commentText;
+        }
+        return await apiCall('/post-comment', 'POST', payload);
     },
 
     // Reply to comment

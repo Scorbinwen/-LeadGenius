@@ -8,7 +8,32 @@ window.addEventListener('DOMContentLoaded', () => {
     checkHealth();
     // Load analyzed leads from sessionStorage if available
     loadAnalyzedLeads();
+    // Set up event delegation for lead action buttons
+    setupLeadActionListeners();
 });
+
+// Set up event delegation for lead action buttons
+function setupLeadActionListeners() {
+    const leadsContainer = document.getElementById('leadsFeed');
+    if (!leadsContainer) return;
+    
+    // Handle Smart Comment button clicks
+    leadsContainer.addEventListener('click', (e) => {
+        if (e.target.closest('.smart-comment-btn')) {
+            const btn = e.target.closest('.smart-comment-btn');
+            const url = btn.getAttribute('data-url');
+            const index = parseInt(btn.getAttribute('data-index'));
+            handleSmartComment(url, index);
+        }
+        
+        // Handle Memo button clicks
+        if (e.target.closest('.memo-btn')) {
+            const btn = e.target.closest('.memo-btn');
+            const index = parseInt(btn.getAttribute('data-index'));
+            handleMemo(index);
+        }
+    });
+}
 
 // Load analyzed leads from sessionStorage
 function loadAnalyzedLeads() {
@@ -450,11 +475,19 @@ function renderLeads() {
         return;
     }
     
-    container.innerHTML = filteredLeads.map(lead => `
+    container.innerHTML = filteredLeads.map((lead, index) => {
+        const avatarText = (lead.username || 'U').substring(0, 2).toUpperCase();
+        const intentBadge = lead.intentScore >= 80 
+            ? `<div class="lead-intent-badge">${lead.intentScore}% INTENT</div>` 
+            : '';
+        const questionText = lead.question || lead.title || '';
+        const contentText = lead.content || '';
+        
+        return `
         <div class="lead-card">
             <div class="lead-header">
                 <div class="lead-user-info">
-                    <div class="lead-avatar">${(lead.username || 'U').charAt(0).toUpperCase()}</div>
+                    <div class="lead-avatar">${avatarText}</div>
                     <div class="lead-user-details">
                         <div class="lead-username">${escapeHtml(lead.username || 'Unknown User')}</div>
                         <div class="lead-meta">
@@ -466,13 +499,31 @@ function renderLeads() {
                         </div>
                     </div>
                 </div>
-                ${lead.intentScore >= 80 ? `<div class="lead-intent-badge">${lead.intentScore}% INTENT</div>` : ''}
+                ${intentBadge}
             </div>
             <div class="lead-content">
-                ${lead.question ? `<div class="lead-question">${escapeHtml(lead.question)}</div>` : ''}
-                ${lead.content ? `<div class="lead-text">${escapeHtml(lead.content.length > 200 ? lead.content.substring(0, 200) + '...' : lead.content)}</div>` : ''}
+                ${questionText ? `<div class="lead-question">${escapeHtml(questionText)}</div>` : ''}
+                ${contentText ? `<div class="lead-text">${escapeHtml(contentText.length > 500 ? contentText.substring(0, 500) + '...' : contentText)}</div>` : ''}
             </div>
             <div class="lead-footer">
+                <div class="lead-actions">
+                    <button class="lead-action-btn primary smart-comment-btn" data-url="${escapeHtml(lead.url)}" data-index="${index}" id="smartCommentBtn-${index}">
+                        <svg class="lead-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L15 9l7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z"></path>
+                        </svg>
+                        Smart Comment
+                    </button>
+                    <button class="lead-action-btn secondary memo-btn" data-index="${index}">
+                        <svg class="lead-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                            <polyline points="10 9 9 9 8 9"></polyline>
+                        </svg>
+                        Memo
+                    </button>
+                </div>
                 <a href="${escapeHtml(lead.url)}" target="_blank" rel="noopener noreferrer" class="lead-url">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
@@ -483,7 +534,8 @@ function renderLeads() {
                 </a>
             </div>
         </div>
-    `).join('');
+        `;
+    }).join('');
 }
 
 // Tab switching
@@ -495,8 +547,53 @@ function setActiveTab(tab) {
     renderLeads();
 }
 
+// Handle Smart Comment - opens new page
+function handleSmartComment(url, leadIndex) {
+    // Find the lead data from filtered leads
+    const filteredLeads = activeTab === 'high' 
+        ? discoveredLeads.filter(lead => lead.intentScore >= 80)
+        : discoveredLeads;
+    
+    // Sort to match render order
+    const sortedLeads = [...filteredLeads].sort((a, b) => b.intentScore - a.intentScore);
+    const lead = sortedLeads[leadIndex];
+    
+    if (!lead) {
+        alert('Lead not found');
+        return;
+    }
+    
+    // Build URL with parameters
+    const params = new URLSearchParams({
+        url: url,
+        title: lead.question || lead.title || '',
+        content: lead.content || '',
+        platform: lead.platform || 'Reddit'
+    });
+    
+    // Open in new window
+    const width = 900;
+    const height = 700;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+
+    window.open(
+        `smart-comment.html?${params.toString()}`,
+        'SmartComment',
+        `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+    );
+}
+
+// Handle Memo (placeholder function)
+function handleMemo(leadIndex) {
+    // TODO: Implement memo functionality
+    alert('Memo functionality coming soon!');
+}
+
 // Make functions globally available
 window.setActiveTab = setActiveTab;
 window.renderLeads = renderLeads;
 window.discoveredLeads = discoveredLeads;
+window.handleSmartComment = handleSmartComment;
+window.handleMemo = handleMemo;
 
