@@ -1061,6 +1061,31 @@
             font-size: 0.9375rem;
             line-height: 1.7;
             white-space: pre-wrap;
+            width: 100%;
+            min-height: 150px;
+            border: none;
+            background: transparent;
+            resize: vertical;
+            font-family: inherit;
+            padding: 0.5rem;
+            outline: none;
+            transition: all 0.2s;
+        }
+        
+        .smart-comment-draft-text:focus {
+            outline: 2px solid #3b82f6;
+            outline-offset: -2px;
+            border-radius: 0.25rem;
+            background: #f9fafb;
+        }
+        
+        .smart-comment-draft-text::placeholder {
+            color: #9ca3af;
+            font-style: italic;
+        }
+        
+        .smart-comment-draft-text:hover {
+            background: #f9fafb;
         }
         
         .smart-comment-modal-footer {
@@ -1385,7 +1410,7 @@
                             <div class="smart-comment-analyzing-text">ANALYZING FORUM ETIQUETTE...</div>
                         </div>
                         <div class="smart-comment-draft-content">
-                            <div class="smart-comment-draft-text" id="smartCommentDraftText"></div>
+                            <textarea class="smart-comment-draft-text" id="smartCommentDraftText" placeholder="Your comment will appear here..." rows="8"></textarea>
                         </div>
                     </div>
                 </div>

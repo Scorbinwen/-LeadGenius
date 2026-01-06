@@ -547,7 +547,7 @@ function setActiveTab(tab) {
     renderLeads();
 }
 
-// Handle Smart Comment - opens new page
+// Handle Smart Comment - shows modal
 function handleSmartComment(url, leadIndex) {
     // Find the lead data from filtered leads
     const filteredLeads = activeTab === 'high' 
@@ -563,25 +563,28 @@ function handleSmartComment(url, leadIndex) {
         return;
     }
     
-    // Build URL with parameters
-    const params = new URLSearchParams({
-        url: url,
-        title: lead.question || lead.title || '',
-        content: lead.content || '',
-        platform: lead.platform || 'Reddit'
-    });
+    // Store current comment data
+    currentSmartCommentUrl = url;
+    currentSmartCommentText = '';
     
-    // Open in new window
-    const width = 900;
-    const height = 700;
-    const left = (window.screen.width - width) / 2;
-    const top = (window.screen.height - height) / 2;
-
-    window.open(
-        `smart-comment.html?${params.toString()}`,
-        'SmartComment',
-        `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
-    );
+    // Set modal content
+    document.getElementById('smartCommentPlatformTag').textContent = (lead.platform || 'Reddit').toUpperCase();
+    document.getElementById('smartCommentContextTitle').textContent = lead.question || lead.title || 'Post Title';
+    document.getElementById('smartCommentContextQuote').textContent = lead.content || 'No content available';
+    document.getElementById('smartCommentStatusText').textContent = 'SYNTHESIZING PLATFORM-AWARE RESPONSE';
+    
+    // Reset draft box
+    const draftBox = document.getElementById('smartCommentDraftBox');
+    const draftTextarea = document.getElementById('smartCommentDraftText');
+    draftBox.classList.remove('has-content');
+    draftTextarea.value = '';
+    document.getElementById('smartCommentSendBtn').disabled = true;
+    
+    // Show modal
+    document.getElementById('smartCommentModal').style.display = 'flex';
+    
+    // Generate comment automatically
+    generateSmartComment();
 }
 
 // Handle Memo (placeholder function)
@@ -590,10 +593,154 @@ function handleMemo(leadIndex) {
     alert('Memo functionality coming soon!');
 }
 
+// Smart Comment Modal State
+let currentSmartCommentUrl = '';
+let currentSmartCommentText = '';
+
+// Close Smart Comment Modal
+function closeSmartCommentModal() {
+    document.getElementById('smartCommentModal').style.display = 'none';
+    currentSmartCommentUrl = '';
+    currentSmartCommentText = '';
+}
+
+// Generate Smart Comment
+async function generateSmartComment() {
+    const draftBox = document.getElementById('smartCommentDraftBox');
+    const sendBtn = document.getElementById('smartCommentSendBtn');
+    const statusText = document.getElementById('smartCommentStatusText');
+    const draftTextarea = document.getElementById('smartCommentDraftText');
+    
+    try {
+        statusText.textContent = 'GENERATING SMART COMMENT...';
+        
+        // Call API to generate comment (preview only, doesn't post)
+        const result = await API.generateComment(currentSmartCommentUrl, 'lead_gen');
+        
+        if (result.success) {
+            // Extract comment from result
+            currentSmartCommentText = result.comment || result.message || 'Comment generated successfully.';
+            
+            // Show draft and set textarea value (editable)
+            draftBox.classList.add('has-content');
+            draftTextarea.value = currentSmartCommentText;
+            sendBtn.disabled = false;
+            statusText.textContent = 'COMMENT READY - You can edit it below';
+        } else {
+            throw new Error(result.message || 'Failed to generate comment');
+        }
+    } catch (error) {
+        console.error('Error generating comment:', error);
+        draftBox.classList.add('has-content');
+        draftTextarea.value = 'Error: ' + error.message;
+        statusText.textContent = 'ERROR GENERATING COMMENT';
+    }
+}
+
+// Regenerate Smart Comment
+async function regenerateSmartComment() {
+    const draftBox = document.getElementById('smartCommentDraftBox');
+    const sendBtn = document.getElementById('smartCommentSendBtn');
+    const statusText = document.getElementById('smartCommentStatusText');
+    
+    draftBox.classList.remove('has-content');
+    sendBtn.disabled = true;
+    statusText.textContent = 'REGENERATING COMMENT...';
+    
+    await generateSmartComment();
+}
+
+// Send Smart Comment (uses edited text from textarea)
+async function sendSmartComment() {
+    const sendBtn = document.getElementById('smartCommentSendBtn');
+    const statusText = document.getElementById('smartCommentStatusText');
+    const draftTextarea = document.getElementById('smartCommentDraftText');
+    
+    // Get the edited text from textarea (user may have customized it)
+    const editedComment = draftTextarea.value.trim();
+    
+    if (!editedComment) {
+        alert('Please generate a comment first');
+        return;
+    }
+    
+    sendBtn.disabled = true;
+    sendBtn.innerHTML = `
+        <svg class="smart-comment-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin 1s linear infinite;">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M12 6v6l4 2"></path>
+        </svg>
+        Sending...
+    `;
+    statusText.textContent = 'POSTING COMMENT...';
+    
+    try {
+        // Pass the edited comment text (user's customizations)
+        const result = await API.postComment(currentSmartCommentUrl, 'lead_gen', editedComment);
+        
+        if (result.success) {
+            statusText.textContent = 'COMMENT POSTED SUCCESSFULLY';
+            sendBtn.innerHTML = `
+                <svg class="smart-comment-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20 6L9 17l-5-5"></path>
+                </svg>
+                Posted
+            `;
+            sendBtn.style.background = '#059669';
+            
+            // Close modal after 1.5 seconds
+            setTimeout(() => {
+                closeSmartCommentModal();
+                // Optionally refresh leads
+                if (typeof renderLeads === 'function') {
+                    renderLeads();
+                }
+            }, 1500);
+        } else {
+            throw new Error(result.message || 'Failed to post comment');
+        }
+    } catch (error) {
+        console.error('Error posting comment:', error);
+        sendBtn.disabled = false;
+        sendBtn.innerHTML = `
+            <svg class="smart-comment-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+            Send to Reddit
+        `;
+        statusText.textContent = 'ERROR POSTING COMMENT';
+        alert('Error: ' + error.message);
+    }
+}
+
 // Make functions globally available
 window.setActiveTab = setActiveTab;
 window.renderLeads = renderLeads;
 window.discoveredLeads = discoveredLeads;
 window.handleSmartComment = handleSmartComment;
 window.handleMemo = handleMemo;
+window.closeSmartCommentModal = closeSmartCommentModal;
+window.generateSmartComment = generateSmartComment;
+window.regenerateSmartComment = regenerateSmartComment;
+window.sendSmartComment = sendSmartComment;
+
+// Initialize modal event listeners
+document.addEventListener('DOMContentLoaded', () => {
+    const modal = document.getElementById('smartCommentModal');
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeSmartCommentModal();
+            }
+        });
+    }
+    
+    // Close on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && modal && modal.style.display !== 'none') {
+            closeSmartCommentModal();
+        }
+    });
+});
 
