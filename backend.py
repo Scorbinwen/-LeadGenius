@@ -50,6 +50,10 @@ try:
     auto_promote_product = getattr(service_mcp, 'auto_promote_product', None)
     ensure_browser = getattr(service_mcp, 'ensure_browser', None)
     
+    # Import platform registry
+    from platforms.platform_registry import PlatformRegistry
+    from platforms.base_platform import BasePlatform
+    
     # Verify critical imports
     if login_impl is None:
         raise ImportError("login_impl not found in service_mcp module. Please check service_mcp.py")
@@ -188,6 +192,7 @@ class HealthResponse(BaseModel):
 class AnalyzeProductRequest(BaseModel):
     product_description: str = Field(..., description="Product description")
     website_url: Optional[str] = Field(None, description="Website URL (optional)")
+    platform: str = Field("reddit", description="Platform to search: reddit, twitter, instagram, quora, linkedin, tiktok")
 
 class AnalyzeProductResponse(BaseModel):
     success: bool
@@ -693,10 +698,34 @@ async def auto_promote(request: AutoPromoteRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Auto promotion failed: {str(e)}")
 
+@app.get("/api/platforms")
+async def get_platforms():
+    """Get list of available platforms"""
+    try:
+        from platforms.platform_registry import PlatformRegistry
+        platforms = PlatformRegistry.get_available_platforms()
+        return {
+            "success": True,
+            "platforms": platforms,
+            "message": f"Found {len(platforms)} platforms"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get platforms: {str(e)}")
+
 @app.post("/api/analyze-product", response_model=AnalyzeProductResponse)
 async def analyze_product(request: AnalyzeProductRequest):
     """Analyze product: search posts, get content, get comments, and analyze intent"""
     try:
+        # Get platform instance from platform_name
+        platform_name = request.platform.lower() if request.platform else "reddit"
+        try:
+            # Get browser context and page from service_mcp
+            browser_context = getattr(service_mcp, 'browser_context', None)
+            main_page = getattr(service_mcp, 'main_page', None)
+            platform = PlatformRegistry.get_platform(platform_name, browser_context=browser_context, main_page=main_page)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        
         # Step 1: Generate search keywords
         if generate_search_keywords_impl is None:
             raise HTTPException(status_code=500, detail="generate_search_keywords_impl not found")
@@ -704,11 +733,8 @@ async def analyze_product(request: AnalyzeProductRequest):
         keywords_result = await generate_search_keywords_impl(request.product_description)
         keywords = keywords_result.replace("Search keywords generated from product description:", "").strip()
         
-        # Step 2: Search for posts
-        if search_notes_impl is None:
-            raise HTTPException(status_code=500, detail="search_notes_impl not found")
-        
-        search_result = await search_notes_impl(keywords, limit=1)
+        # Step 2: Search for posts using platform
+        search_result = await platform.search_posts(keywords, limit=5)
         if not search_result or not isinstance(search_result, str) or "No posts found" in search_result:
             return {
                 "success": True,
@@ -757,42 +783,14 @@ async def analyze_product(request: AnalyzeProductRequest):
                 if not post_url:
                     return post_leads
                 
-                # Get post content
-                post_content = ""
-                if get_note_content_impl:
-                    content_result = await get_note_content_impl(post_url)
-                    post_content = content_result if isinstance(content_result, str) else str(content_result)
+                # Get post content using platform
+                post_content_str = await platform.get_post_content(post_url)
+                post_content = post_content_str if isinstance(post_content_str, str) else str(post_content_str)
                 
-                # Get comments - use _get_note_comments_structured directly for structured data
+                # Get comments using platform
                 comments = []
                 try:
-                    _get_note_comments_structured = getattr(service_mcp, '_get_note_comments_structured', None)
-                    if _get_note_comments_structured and callable(_get_note_comments_structured):
-                        comments = await _get_note_comments_structured(post_url)
-                    elif get_note_comments_impl:
-                        # Fallback to impl version if structured version not available
-                        comments_result = await get_note_comments_impl(post_url)
-                        if isinstance(comments_result, list):
-                            comments = comments_result
-                        elif isinstance(comments_result, str):
-                            # Try to parse from string format
-                            import re
-                            lines = comments_result.split('\n')
-                            for line in lines:
-                                line = line.strip()
-                                if line and line[0].isdigit() and '.' in line:
-                                    parts = line.split('. ', 1)
-                                    if len(parts) == 2:
-                                        comment_text = parts[1]
-                                        if ' (' in comment_text and '):' in comment_text:
-                                            username_part = comment_text.split(' (')[0]
-                                            time_part = comment_text.split(' (')[1].split('):')[0]
-                                            content = comment_text.split('): ', 1)[1] if '): ' in comment_text else ''
-                                            comments.append({
-                                                'username': username_part,
-                                                'time': time_part,
-                                                'content': content
-                                            })
+                    comments = await platform.get_post_comments(post_url)
                 except Exception as e:
                     print(f"Error getting comments for {post_url}: {e}")
                     comments = []
@@ -803,8 +801,8 @@ async def analyze_product(request: AnalyzeProductRequest):
                 # Create lead for the post
                 post_leads.append({
                     "id": f"post-{i}",
-                    "username": extract_username_from_url(post_url) or "Reddit User",
-                    "platform": "Reddit",
+                    "username": extract_username_from_url(post_url) or f"{platform_name.capitalize()} User",
+                    "platform": platform_name.capitalize(),
                     "category": "LIFESTYLE NOTE",
                     "date": post.get('date', ''),
                     "title": post_title,

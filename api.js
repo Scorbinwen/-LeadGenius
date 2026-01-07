@@ -99,6 +99,11 @@ const API = {
         });
     },
 
+    // Get available platforms
+    async getPlatforms() {
+        return await apiCall('/platforms', 'GET');
+    },
+
     // Auto promote product
     async autoPromote(productDescription, searchKeywords = '', maxPosts = 5, minMatchScore = 40.0) {
         return await apiCall('/auto-promote', 'POST', {

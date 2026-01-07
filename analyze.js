@@ -125,6 +125,9 @@ async function handleAnalyze(event) {
         // Update loading steps
         updateLoadingStep(1); // Searching for posts
         
+        // Get platform selection
+        const platform = document.getElementById('platform')?.value || 'reddit';
+        
         // Call analyze product endpoint
         const response = await fetch('http://localhost:8000/api/analyze-product', {
             method: 'POST',
@@ -133,7 +136,8 @@ async function handleAnalyze(event) {
             },
             body: JSON.stringify({
                 product_description: productDescription,
-                website_url: websiteUrl || null
+                website_url: websiteUrl || null,
+                platform: platform
             })
         });
         
