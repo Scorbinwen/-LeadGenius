@@ -31,6 +31,7 @@ from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 import uvicorn
 import os
+import time
 # Import functions from service_mcp
 # Note: We import both MCP tools and _impl versions for flexibility
 try:
@@ -744,22 +745,23 @@ async def analyze_product(request: AnalyzeProductRequest):
                 "message": "No posts found matching the product description"
             }
         
-        # Step 3: Process each post
-        leads = []
-        for i, post in enumerate(posts[:5]):  # Limit to 5 posts for performance
+        # Step 3: Process each post in parallel for better performance
+        # Use asyncio to parallelize post processing
+        async def process_single_post(i: int, post: dict, product_description: str) -> list:
+            """Process a single post and return its leads"""
+            post_leads = []
             try:
                 post_url = post.get('url', '')
                 post_title = post.get('title', '')
                 
                 if not post_url:
-                    continue
+                    return post_leads
                 
                 # Get post content
+                post_content = ""
                 if get_note_content_impl:
                     content_result = await get_note_content_impl(post_url)
                     post_content = content_result if isinstance(content_result, str) else str(content_result)
-                else:
-                    post_content = ""
                 
                 # Get comments - use _get_note_comments_structured directly for structured data
                 comments = []
@@ -796,10 +798,10 @@ async def analyze_product(request: AnalyzeProductRequest):
                     comments = []
                 
                 # Analyze intent for post content
-                intent_score = await _analyze_intent_score(post_content, request.product_description)
+                intent_score = await _analyze_intent_score(post_content, product_description)
                 
                 # Create lead for the post
-                leads.append({
+                post_leads.append({
                     "id": f"post-{i}",
                     "username": extract_username_from_url(post_url) or "Reddit User",
                     "platform": "Reddit",
@@ -813,16 +815,17 @@ async def analyze_product(request: AnalyzeProductRequest):
                     "type": "post"
                 })
                 
-                # Analyze comments for intent
-                for j, comment in enumerate(comments[:10]):  # Limit to 10 comments per post
+                # Process comments in parallel for intent analysis
+                async def process_comment(j: int, comment: dict) -> Optional[dict]:
+                    """Process a single comment and return lead if intent is high enough"""
                     comment_content = comment.get('content', '') or comment.get('Content', '')
                     comment_username = comment.get('username', '') or comment.get('Username', '')
                     
                     if not comment_content:
-                        continue
+                        return None
                     
                     # Analyze comment intent
-                    comment_intent = await _analyze_intent_score(comment_content, request.product_description)
+                    comment_intent = await _analyze_intent_score(comment_content, product_description)
                     
                     if comment_intent >= 40:  # Only include comments with reasonable intent
                         # Create comment URL
@@ -830,7 +833,7 @@ async def analyze_product(request: AnalyzeProductRequest):
                         if '/comments/' in post_url:
                             comment_url = post_url.split('?')[0] + f'#comment-{j}'
                         
-                        leads.append({
+                        return {
                             "id": f"comment-{i}-{j}",
                             "username": comment_username or "Unknown User",
                             "platform": "Reddit",
@@ -842,10 +845,40 @@ async def analyze_product(request: AnalyzeProductRequest):
                             "url": comment_url,
                             "intentScore": comment_intent,
                             "type": "comment"
-                        })
+                        }
+                    return None
+                
+                # Process all comments in parallel
+                comment_tasks = [process_comment(j, comment) for j, comment in enumerate(comments[:10])]  # Limit to 10 comments per post
+                comment_results = await asyncio.gather(*comment_tasks, return_exceptions=True)
+                
+                # Collect valid comment leads
+                for result in comment_results:
+                    if isinstance(result, Exception):
+                        continue
+                    if result is not None:
+                        post_leads.append(result)
+                
             except Exception as e:
                 print(f"Error processing post {i}: {e}")
+            
+            return post_leads
+        
+        # Process all posts in parallel
+        parallel_start = time.time()
+        post_tasks = [process_single_post(i, post, request.product_description) for i, post in enumerate(posts[:5])]  # Limit to 5 posts
+        post_results = await asyncio.gather(*post_tasks, return_exceptions=True)
+        parallel_time = time.time() - parallel_start
+        print(f"[TIMING] Parallel post processing took: {parallel_time:.2f}s")
+        
+        # Flatten results from all posts
+        leads = []
+        for result in post_results:
+            if isinstance(result, Exception):
+                print(f"Error in post processing: {result}")
                 continue
+            if isinstance(result, list):
+                leads.extend(result)
         
         # Sort by intent score
         leads.sort(key=lambda x: x.get('intentScore', 0), reverse=True)

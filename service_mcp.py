@@ -1426,9 +1426,11 @@ async def _get_note_comments_structured(url: str) -> List[Dict[str, Any]]:
             print(f"[TIMING] Querying shreddit-comment elements took: {method1_query_time:.2f}s")
             print(f"Found {len(comment_elements)} shreddit-comment elements")
             
-            # Process each comment element
+            # Process each comment element in parallel for better performance
             process_start = time.time()
-            for element in comment_elements:
+            
+            async def process_comment_element(element):
+                """Process a single comment element and extract its data"""
                 try:
                     # Get username - Reddit stores it in the 'author' attribute of shreddit-comment
                     username = "[deleted]"
@@ -1569,20 +1571,32 @@ async def _get_note_comments_structured(url: str) -> List[Dict[str, Any]]:
                     except:
                         pass
                     
-                    # Only add if we have valid content
+                    # Return comment data if valid
                     if content and len(content.strip()) > 10:  # Minimum content length
-                        comments.append({
+                        return {
                             "Username": username,
                             "Content": content,
                             "Time": time_location
-                        })
+                        }
+                    return None
                 except Exception as e:
                     print(f"Error processing comment element: {e}")
+                    return None
+            
+            # Process all comment elements in parallel
+            comment_tasks = [process_comment_element(element) for element in comment_elements]
+            comment_results = await asyncio.gather(*comment_tasks, return_exceptions=True)
+            
+            # Collect valid comments
+            for result in comment_results:
+                if isinstance(result, Exception):
                     continue
+                if result is not None:
+                    comments.append(result)
             
             if process_start:
                 process_time = time.time() - process_start
-                print(f"[TIMING] Processing {len(comment_elements)} comment elements took: {process_time:.2f}s")
+                print(f"[TIMING] Processing {len(comment_elements)} comment elements in parallel took: {process_time:.2f}s")
         except Exception as e:
             method1_time = time.time() - method1_start
             print(f"[TIMING] Method 1 failed after {method1_time:.2f}s: {e}")
