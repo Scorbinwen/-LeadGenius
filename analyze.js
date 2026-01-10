@@ -125,8 +125,14 @@ async function handleAnalyze(event) {
         // Update loading steps
         updateLoadingStep(1); // Searching for posts
         
-        // Get platform selection
-        const platform = document.getElementById('platform')?.value || 'reddit';
+        // Get platform selection (element ID is "platform" in analyze.html)
+        const platformSelect = document.getElementById('platform');
+        const platform = platformSelect?.value || null;
+        
+        if (!platform || platform === '') {
+            showError('Please select a platform');
+            return;
+        }
         
         // Call analyze product endpoint
         const response = await fetch('http://localhost:8000/api/analyze-product', {
@@ -148,9 +154,10 @@ async function handleAnalyze(event) {
         const result = await response.json();
         
         if (result.success) {
-            // Store leads in sessionStorage
+            // Store leads and metadata in sessionStorage
             sessionStorage.setItem('analyzedLeads', JSON.stringify(result.leads));
             sessionStorage.setItem('productDescription', productDescription);
+            sessionStorage.setItem('selectedPlatform', platform); // Store selected platform
             
             // Redirect to dashboard
             window.location.href = 'dashboard.html';

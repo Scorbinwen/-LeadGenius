@@ -32,40 +32,30 @@ from contextlib import asynccontextmanager
 import uvicorn
 import os
 import time
-# Import functions from service_mcp
-# Note: We import both MCP tools and _impl versions for flexibility
+# Import shared utilities from service_mcp (browser management, LLM)
 try:
     import service_mcp
-    # Import functions explicitly
-    login_impl = getattr(service_mcp, 'login_impl', None)
-    search_notes_impl = getattr(service_mcp, 'search_notes_impl', None)
-    get_note_content_impl = getattr(service_mcp, 'get_note_content_impl', None)
-    # Use _impl version to avoid FunctionTool wrapper from @mcp.tool() decorator
-    get_note_comments_impl = getattr(service_mcp, 'get_note_comments_impl', None)
-    post_smart_comment = getattr(service_mcp, 'post_smart_comment', None)
-    reply_to_comment = getattr(service_mcp, 'reply_to_comment', None)
-    # Use _impl version to avoid FunctionTool wrapper from @mcp.tool() decorator
-    generate_search_keywords_impl = getattr(service_mcp, 'generate_search_keywords_impl', None)
-    post_smart_comment_impl = getattr(service_mcp, 'post_smart_comment_impl', None)
-    auto_promote_product = getattr(service_mcp, 'auto_promote_product', None)
+    # Only import shared utilities - browser management and LLM
     ensure_browser = getattr(service_mcp, 'ensure_browser', None)
+    _call_llm = getattr(service_mcp, '_call_llm', None)
     
     # Import platform registry
     from platforms.platform_registry import PlatformRegistry
     from platforms.base_platform import BasePlatform
     
     # Verify critical imports
-    if login_impl is None:
-        raise ImportError("login_impl not found in service_mcp module. Please check service_mcp.py")
-    if not callable(login_impl):
-        raise ImportError(f"login_impl is not callable. Type: {type(login_impl)}. Value: {login_impl}")
+    if ensure_browser is None:
+        raise ImportError("ensure_browser not found in service_mcp module. Please check service_mcp.py")
+    if not callable(ensure_browser):
+        raise ImportError(f"ensure_browser is not callable. Type: {type(ensure_browser)}. Value: {ensure_browser}")
     
     # Print confirmation
-    print(f"✓ Successfully imported login_impl: {type(login_impl)}, callable: {callable(login_impl)}")
+    print(f"✓ Successfully imported shared utilities from service_mcp")
+    print(f"✓ Platform registry loaded")
         
 except ImportError as e:
-    print(f"Error: Could not import from service_mcp: {e}")
-    print("Make sure service_mcp.py is in the same directory as backend.py")
+    print(f"Error: Could not import from service_mcp or platforms: {e}")
+    print("Make sure service_mcp.py and platforms/ directory exist")
     raise
 except Exception as e:
     print(f"Error importing from service_mcp: {e}")
@@ -192,7 +182,7 @@ class HealthResponse(BaseModel):
 class AnalyzeProductRequest(BaseModel):
     product_description: str = Field(..., description="Product description")
     website_url: Optional[str] = Field(None, description="Website URL (optional)")
-    platform: str = Field("reddit", description="Platform to search: reddit, twitter, instagram, quora, linkedin, tiktok")
+    platform: str = Field(..., description="Platform to search: reddit, twitter, instagram, quora, linkedin, tiktok (required)")
 
 class AnalyzeProductResponse(BaseModel):
     success: bool
@@ -305,16 +295,14 @@ async def debug_imports():
     try:
         import service_mcp
         return {
-            "login_impl": {
-                "exists": hasattr(service_mcp, 'login_impl'),
-                "type": str(type(getattr(service_mcp, 'login_impl', None))),
-                "callable": callable(getattr(service_mcp, 'login_impl', None))
+            "reddit_platform": {
+                "exists": hasattr(PlatformRegistry, 'get_platform'),
+                "available": "reddit" in PlatformRegistry.get_available_platforms()
             },
             "module_attrs": [attr for attr in dir(service_mcp) if not attr.startswith('_')][:20],
-            "backend_login_impl": {
-                "exists": login_impl is not None,
-                "type": str(type(login_impl)),
-                "callable": callable(login_impl) if login_impl is not None else False
+            "service_mcp_utilities": {
+                "ensure_browser": hasattr(service_mcp, 'ensure_browser'),
+                "_call_llm": hasattr(service_mcp, '_call_llm')
             }
         }
     except Exception as e:
@@ -356,25 +344,13 @@ async def browser_status():
 async def login():
     """Login to Reddit account"""
     try:
-        # Re-import to ensure we have the latest version
-        import service_mcp
-        current_login_impl = getattr(service_mcp, 'login_impl', None)
+        # Get Reddit platform instance
+        browser_context = getattr(service_mcp, 'browser_context', None)
+        main_page = getattr(service_mcp, 'main_page', None)
+        reddit_platform = PlatformRegistry.get_platform("reddit", browser_context=browser_context, main_page=main_page)
         
-        # Check if login_impl exists and is callable
-        if current_login_impl is None:
-            raise HTTPException(
-                status_code=500, 
-                detail="login_impl function not found in service_mcp module. Please check service_mcp.py"
-            )
-        
-        if not callable(current_login_impl):
-            raise HTTPException(
-                status_code=500, 
-                detail=f"login_impl is not callable. Type: {type(current_login_impl)}"
-            )
-        
-        # Use the current version
-        result = await current_login_impl()
+        # Use platform login
+        result = await reddit_platform.login()
         success = "success" in result.lower() or "logged in" in result.lower() or "already" in result.lower()
         return {
             "success": success,
@@ -391,7 +367,12 @@ async def login():
 async def search_notes(request: SearchNotesRequest):
     """Search for Reddit posts by keywords"""
     try:
-        result = await search_notes_impl(request.keywords, request.limit)
+        # Get Reddit platform instance
+        browser_context = getattr(service_mcp, 'browser_context', None)
+        main_page = getattr(service_mcp, 'main_page', None)
+        reddit_platform = PlatformRegistry.get_platform("reddit", browser_context=browser_context, main_page=main_page)
+        
+        result = await reddit_platform.search_posts(request.keywords, request.limit)
         
         # Parse the result string into structured data
         results = []
@@ -428,7 +409,12 @@ async def search_notes(request: SearchNotesRequest):
 async def get_note_content(request: GetNoteContentRequest):
     """Get content of a specific Reddit post"""
     try:
-        result = await get_note_content_impl(request.url)
+        # Get Reddit platform instance
+        browser_context = getattr(service_mcp, 'browser_context', None)
+        main_page = getattr(service_mcp, 'main_page', None)
+        reddit_platform = PlatformRegistry.get_platform("reddit", browser_context=browser_context, main_page=main_page)
+        
+        result = await reddit_platform.get_post_content(request.url)
         return {
             "success": True,
             "content": result,
@@ -441,53 +427,24 @@ async def get_note_content(request: GetNoteContentRequest):
 async def get_note_comments_endpoint(request: GetCommentsRequest):
     """Get comments for a specific Reddit post"""
     try:
-        # Use _impl version to avoid FunctionTool wrapper
-        if get_note_comments_impl is None:
-            raise HTTPException(
-                status_code=500, 
-                detail="get_note_comments_impl function not found in service_mcp module"
-            )
+        # Get Reddit platform instance
+        browser_context = getattr(service_mcp, 'browser_context', None)
+        main_page = getattr(service_mcp, 'main_page', None)
+        reddit_platform = PlatformRegistry.get_platform("reddit", browser_context=browser_context, main_page=main_page)
         
-        if not callable(get_note_comments_impl):
-            raise HTTPException(
-                status_code=500, 
-                detail=f"get_note_comments_impl is not callable. Type: {type(get_note_comments_impl)}"
-            )
+        # Get comments as structured data (list of dicts)
+        comments_list = await reddit_platform.get_post_comments(request.url)
         
-        result = await get_note_comments_impl(request.url)
-        
-        # Parse comments from result string
+        # Convert to format expected by frontend
         comments = []
-        if "comments" in result.lower():
-            lines = result.split("\n")
-            for line in lines:
-                line = line.strip()
-                if line and line[0].isdigit() and ". " in line:
-                    # Parse comment format: "1. Username (Time): Content"
-                    # Try both English and Chinese parentheses
-                    parts = line.split(". ", 1)
-                    if len(parts) == 2:
-                        comment_text = parts[1]
-                        # Try English parentheses first: "Username (Time): Content"
-                        if "(" in comment_text and "):" in comment_text:
-                            username_part = comment_text.split("(")[0].strip()
-                            time_part = comment_text.split("(")[1].split(")")[0].strip()
-                            content = comment_text.split("): ", 1)[1] if "): " in comment_text else ""
-                            comments.append({
-                                "username": username_part,
-                                "time": time_part,
-                                "content": content
-                            })
-                        # Try Chinese parentheses: "username（time）: content"
-                        elif "（" in comment_text and "）:" in comment_text:
-                            username_part = comment_text.split("（")[0].strip()
-                            time_part = comment_text.split("（")[1].split("）")[0].strip()
-                            content = comment_text.split("）: ", 1)[1] if "）: " in comment_text else ""
-                            comments.append({
-                                "username": username_part,
-                                "time": time_part,
-                                "content": content
-                            })
+        for comment in comments_list:
+            comments.append({
+                "username": comment.get("Username", comment.get("username", "Unknown")),
+                "time": comment.get("Time", comment.get("time", "Unknown")),
+                "content": comment.get("Content", comment.get("content", ""))
+            })
+        
+        result = f"Found {len(comments)} comments"
         
         return {
             "success": True,
@@ -620,12 +577,13 @@ async def generate_comment(request: PostCommentRequest):
 async def post_comment(request: PostCommentRequest):
     """Post a smart comment on a Reddit post"""
     try:
-        # Use _impl version to avoid FunctionTool wrapper from @mcp.tool() decorator
-        if post_smart_comment_impl is None:
-            raise HTTPException(status_code=500, detail="post_smart_comment_impl not found")
+        # Get Reddit platform instance
+        browser_context = getattr(service_mcp, 'browser_context', None)
+        main_page = getattr(service_mcp, 'main_page', None)
+        reddit_platform = PlatformRegistry.get_platform("reddit", browser_context=browser_context, main_page=main_page)
         
-        # Pass comment_text if provided to avoid regenerating it
-        result = await post_smart_comment_impl(request.url, request.comment_type, request.comment_text)
+        # Post comment using platform
+        result = await reddit_platform.post_comment(request.url, request.comment_text or "", request.comment_type)
         success = "success" in result.lower() or "posted" in result.lower() or "commented" in result.lower()
         return {
             "success": success,
@@ -641,7 +599,12 @@ async def post_comment(request: PostCommentRequest):
 async def reply_comment(request: ReplyCommentRequest):
     """Reply to a specific comment"""
     try:
-        result = await reply_to_comment(request.url, request.comment_content, request.reply_text)
+        # Get Reddit platform instance
+        browser_context = getattr(service_mcp, 'browser_context', None)
+        main_page = getattr(service_mcp, 'main_page', None)
+        reddit_platform = PlatformRegistry.get_platform("reddit", browser_context=browser_context, main_page=main_page)
+        
+        result = await reddit_platform.reply_to_comment(request.url, request.comment_content, request.reply_text)
         success = "success" in result.lower()
         return {
             "success": success,
@@ -654,22 +617,14 @@ async def reply_comment(request: ReplyCommentRequest):
 async def generate_keywords(request: GenerateKeywordsRequest):
     """Generate search keywords from product description"""
     try:
-        # Use _impl version to avoid FunctionTool wrapper
-        if generate_search_keywords_impl is None:
-            raise HTTPException(
-                status_code=500, 
-                detail="generate_search_keywords_impl function not found in service_mcp module"
-            )
+        # Get Reddit platform instance
+        browser_context = getattr(service_mcp, 'browser_context', None)
+        main_page = getattr(service_mcp, 'main_page', None)
+        reddit_platform = PlatformRegistry.get_platform("reddit", browser_context=browser_context, main_page=main_page)
         
-        if not callable(generate_search_keywords_impl):
-            raise HTTPException(
-                status_code=500, 
-                detail=f"generate_search_keywords_impl is not callable. Type: {type(generate_search_keywords_impl)}"
-            )
-        
-        result = await generate_search_keywords_impl(request.product_description)
-        # Extract keywords from result
-        keywords = result.replace("Search keywords generated from product description:", "").strip()
+        # Generate keywords using platform
+        keywords = await reddit_platform.generate_search_keywords(request.product_description)
+        result = f"Search keywords generated from product description: {keywords}"
         return {
             "success": True,
             "keywords": keywords,
@@ -684,16 +639,12 @@ async def generate_keywords(request: GenerateKeywordsRequest):
 async def auto_promote(request: AutoPromoteRequest):
     """Automatically promote product by searching posts, analyzing comments, and replying"""
     try:
-        result = await auto_promote_product(
-            request.product_description,
-            request.search_keywords or "",
-            request.max_posts,
-            request.min_match_score
-        )
+        # Note: auto_promote_product is not yet refactored to use RedditPlatform
+        # For now, return a message indicating it needs to be implemented
         return {
-            "success": True,
-            "report": result,
-            "message": "Auto promotion completed"
+            "success": False,
+            "report": "Auto promotion feature is not yet available. Please use analyze-product endpoint instead.",
+            "message": "Auto promotion feature needs to be refactored to use RedditPlatform"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Auto promotion failed: {str(e)}")
@@ -716,8 +667,8 @@ async def get_platforms():
 async def analyze_product(request: AnalyzeProductRequest):
     """Analyze product: search posts, get content, get comments, and analyze intent"""
     try:
-        # Get platform instance from platform_name
-        platform_name = request.platform.lower() if request.platform else "reddit"
+        # Get platform instance from platform_name (required from request)
+        platform_name = request.platform.lower()
         try:
             # Get browser context and page from service_mcp
             browser_context = getattr(service_mcp, 'browser_context', None)
@@ -726,12 +677,8 @@ async def analyze_product(request: AnalyzeProductRequest):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         
-        # Step 1: Generate search keywords
-        if generate_search_keywords_impl is None:
-            raise HTTPException(status_code=500, detail="generate_search_keywords_impl not found")
-        
-        keywords_result = await generate_search_keywords_impl(request.product_description)
-        keywords = keywords_result.replace("Search keywords generated from product description:", "").strip()
+        # Step 1: Generate search keywords using platform
+        keywords = await platform.generate_search_keywords(request.product_description)
         
         # Step 2: Search for posts using platform
         search_result = await platform.search_posts(keywords, limit=5)
@@ -834,7 +781,7 @@ async def analyze_product(request: AnalyzeProductRequest):
                         return {
                             "id": f"comment-{i}-{j}",
                             "username": comment_username or "Unknown User",
-                            "platform": "Reddit",
+                            "platform": platform_name.capitalize(),
                             "category": "LIFESTYLE NOTE",
                             "date": comment.get('time', '') or comment.get('Time', ''),
                             "title": "",
