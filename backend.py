@@ -680,8 +680,8 @@ async def analyze_product(request: AnalyzeProductRequest):
         # Step 1: Generate search keywords using platform
         keywords = await platform.generate_search_keywords(request.product_description)
         
-        # Step 2: Search for posts using platform
-        search_result = await platform.search_posts(keywords, limit=5)
+        # Step 2: Search for posts using platform (pass product_description for relevance filtering)
+        search_result = await platform.search_posts(keywords, limit=5, product_description=request.product_description)
         if not search_result or not isinstance(search_result, str) or "No posts found" in search_result:
             return {
                 "success": True,

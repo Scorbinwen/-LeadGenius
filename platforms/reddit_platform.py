@@ -92,8 +92,56 @@ class RedditPlatform(BasePlatform):
         except Exception as e:
             return f"Error during login: {str(e)}"
     
-    async def search_posts(self, keywords: str, limit: int = 100) -> str:
-        """Search for Reddit posts"""
+    async def _is_post_relevant(self, post_title: str, product_description: str) -> bool:
+        """Use LLM to quickly check if a post title is relevant to the product
+        
+        Checks if the post:
+        1. Is highly related to the given product
+        2. Is NOT a competitive product promotion
+        3. Probably requests the given product or asks if such a product exists
+        
+        Returns:
+            True if post is relevant, False otherwise
+        """
+        if not product_description or not post_title:
+            return True  # If no product description, include all posts
+        
+        try:
+            prompt = f"""Analyze if this Reddit post title is relevant to our product.
+
+Post Title: "{post_title}"
+Our Product: {product_description}
+
+Check if the Post Title satisfies all of the following conditions:
+1. this post title is highly related to our product (not just tangentially related)
+2. this post title is NOT promoting a competitive product
+3. this post title probably requests our product or asks if a product like ours exists
+
+Respond with ONLY "YES" if the 3 conditions above all satisfied, or "NO" otherwise.
+Be strict - only say YES if it's clearly related to our product and not a competitor's promotion."""
+            
+            response = await service_mcp._call_llm(
+                prompt=prompt,
+                system_prompt="You are a lead qualification assistant. Analyze post titles to determine if they're relevant to a product.",
+                max_tokens=50
+            )
+            
+            # Check if response indicates relevance
+            response_lower = response.strip().upper()
+            return "YES" in response_lower or response_lower.startswith("YES")
+            
+        except Exception as e:
+            print(f"[WARNING] LLM relevance check failed for post '{post_title}': {e}. Including post by default.")
+            return True  # On error, include the post to avoid false negatives
+    
+    async def search_posts(self, keywords: str, limit: int = 100, product_description: Optional[str] = None) -> str:
+        """Search for Reddit posts
+        
+        Args:
+            keywords: Search keywords
+            limit: Maximum number of results
+            product_description: Optional product description for relevance filtering
+        """
         login_status = await self.ensure_browser()
         if not login_status:
             return "Please login to Reddit account first"
@@ -212,7 +260,12 @@ class RedditPlatform(BasePlatform):
             extract_tasks = [extract_post_info(element) for element in post_elements[:limit]]
             extract_results = await asyncio.gather(*extract_tasks, return_exceptions=True)
             
-            posts = []
+            # Stage 5: Filter posts by relevance using LLM (if product_description provided)
+            filter_start = time.time()
+            filtered_count = 0
+            
+            # First, collect all valid posts with normalized URLs
+            candidate_posts = []
             for result in extract_results:
                 if isinstance(result, Exception):
                     continue
@@ -224,7 +277,35 @@ class RedditPlatform(BasePlatform):
                             full_url = f"https://www.reddit.com{href}"
                         else:
                             full_url = href
-                        posts.append({"href": full_url, "title": title.strip()})
+                        candidate_posts.append({"href": full_url, "title": title.strip()})
+            
+            # If product_description is provided, filter posts in parallel using LLM
+            if product_description and candidate_posts:
+                async def check_relevance(post):
+                    """Check if a post is relevant"""
+                    is_relevant = await self._is_post_relevant(post['title'], product_description)
+                    return post if is_relevant else None
+                
+                # Check relevance in parallel
+                relevance_tasks = [check_relevance(post) for post in candidate_posts]
+                relevance_results = await asyncio.gather(*relevance_tasks, return_exceptions=True)
+                
+                # Collect only relevant posts
+                posts = []
+                for result in relevance_results:
+                    if isinstance(result, Exception):
+                        continue
+                    if result is not None:  # Post is relevant
+                        posts.append(result)
+                    else:  # Post was filtered out
+                        filtered_count += 1
+            else:
+                # No filtering, include all candidate posts
+                posts = candidate_posts
+            
+            filter_time = time.time() - filter_start
+            if product_description and filtered_count > 0:
+                print(f"[TIMING] LLM filtering took: {filter_time:.2f}s, filtered {filtered_count} posts, kept {len(posts)} posts")
             
             extract_time = time.time() - extract_start
             print(f"[TIMING] Extracting {len(post_elements[:limit])} post info in parallel took: {extract_time:.2f}s")
